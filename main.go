@@ -1,16 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net"
 	"net/http"
-	"os"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-// WebSocket Upgrader
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -19,8 +17,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// WebSocket Handler
-func websocketHandler(w http.ResponseWriter, r *http.Request) {
+func handler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		fmt.Println("Error upgrading to websocket:", err)
@@ -36,103 +33,65 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Printf("WebSocket Received: %s\n", message)
 
-		// Send message to TCP server and get acknowledgment
-		ack, err := sendToTCPServer(string(message))
-		if err != nil {
-			fmt.Println("Error sending to TCP server:", err)
-			break
+		// Simulate sending logs to the client
+		for i := 0; i < 5; i++ {
+			logMessage := fmt.Sprintf("%s: Attempted to connect to input device.", time.Now().Format("15:04:05.000"))
+			if err := conn.WriteMessage(messageType, []byte(logMessage)); err != nil {
+				fmt.Println("Error sending log:", err)
+				break
+			}
+			time.Sleep(1 * time.Second)
 		}
 
-		// Send acknowledgment back to WebSocket client
-		if err := conn.WriteMessage(messageType, []byte(ack)); err != nil {
-			fmt.Println("Error sending ACK to WebSocket client:", err)
+		ack := []byte("ACK received")
+		if err := conn.WriteMessage(messageType, ack); err != nil {
+			fmt.Println("Error sending ACK:", err)
 			break
 		}
 	}
 }
 
-// Function to send data to TCP server and receive acknowledgment
-func sendToTCPServer(data string) (string, error) {
-	tcpAddr := "localhost:9090" // Address of the TCP server
-	conn, err := net.Dial("tcp", tcpAddr)
-	if err != nil {
-		return "", fmt.Errorf("Error connecting to TCP server: %w", err)
-	}
-	defer conn.Close()
-
-	// Send data to the TCP server
-	_, err = conn.Write([]byte(data + "\n"))
-	if err != nil {
-		return "", fmt.Errorf("Error sending data to TCP server: %w", err)
-	}
-
-	// Read acknowledgment from the TCP server
-	reader := bufio.NewReader(conn)
-	ack, err := reader.ReadString('\n')
-	if err != nil {
-		return "", fmt.Errorf("Error reading ACK from TCP server: %w", err)
-	}
-
-	return ack, nil
-}
-
-// Start TCP server
-func startTCPServer() {
-	port := ":9090"
-
-	listener, err := net.Listen("tcp", port)
+func tcpServer() {
+	listener, err := net.Listen("tcp", ":9990")
 	if err != nil {
 		fmt.Println("Error starting TCP server:", err)
-		os.Exit(1)
+		return
 	}
 	defer listener.Close()
-	fmt.Println("TCP Server listening on", port)
+	fmt.Println("TCP Server listening on :9990")
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println("Error accepting TCP connection:", err)
+			fmt.Println("Error accepting connection:", err)
 			continue
 		}
-
 		go handleTCPConnection(conn)
 	}
 }
 
-// TCP/IP Handler
 func handleTCPConnection(conn net.Conn) {
 	defer conn.Close()
 
-	reader := bufio.NewReader(conn)
-
+	buf := make([]byte, 1024)
 	for {
-		data, err := reader.ReadString('\n')
+		n, err := conn.Read(buf)
 		if err != nil {
-			if err.Error() == "EOF" {
-				fmt.Println("TCP Client disconnected")
-			} else {
-				fmt.Println("Error reading from TCP connection:", err)
-			}
-			return
+			fmt.Println("TCP Client disconnected")
+			break
 		}
-
-		fmt.Print("TCP Received: ", data)
+		message := string(buf[:n])
+		fmt.Printf("TCP Received: %s\n", message)
 
 		ack := "ACK received\n"
-		_, err = conn.Write([]byte(ack))
-		if err != nil {
-			fmt.Println("Error sending TCP ACK:", err)
-			return
-		}
+		conn.Write([]byte(ack))
 	}
 }
 
 func main() {
-	// Start TCP server in a new Goroutine
-	go startTCPServer()
+	go tcpServer()
 
-	// Start WebSocket server
-	http.HandleFunc("/ws", websocketHandler)
+	http.HandleFunc("/ws", handler)
 	fmt.Println("WebSocket server started at :8080")
 	http.ListenAndServe(":8080", nil)
 }
