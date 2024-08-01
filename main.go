@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -83,6 +84,8 @@ func startTCPServer(ip, port string, wg *sync.WaitGroup, messages chan<- string)
 	fmt.Println("TCP Server listening on", addr)
 	broadcastToWebSocketClients(fmt.Sprintf("TCP Server listening on %s\n", addr))
 
+	go broadcastLoop()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -120,9 +123,25 @@ func handleTCPConnection(conn net.Conn, messages chan<- string) {
 	}
 }
 
+func broadcastLoop() {
+	message := "IN:[<STX>1H|\\^&|||cobas-e411^1|||||host|TSREQ^REAL|P|1<CR>Q|1|^^466716165^13^0^2^^S1^SC||ALL||||||||O<CR>L|1|N<CR><ETX>49<CR><LF>]"
+	for {
+		select {
+		case <-done:
+			fmt.Println("Exiting broadcast loop")
+			return
+		default:
+			fmt.Println("Broadcasting message to WebSocket clients")
+			broadcastToWebSocketClients(message)
+			time.Sleep(1 * time.Second) // Adjust the frequency as needed
+		}
+	}
+}
+
 func broadcastToWebSocketClients(message string) {
 	wsConnections.RLock()
 	defer wsConnections.RUnlock()
+	fmt.Printf("Broadcasting to %d clients\n", len(wsConnections.connections))
 	for _, conn := range wsConnections.connections {
 		err := conn.WriteMessage(websocket.TextMessage, []byte(message))
 		if err != nil {
